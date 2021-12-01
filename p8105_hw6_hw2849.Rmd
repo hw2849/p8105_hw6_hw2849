@@ -1,0 +1,36 @@
+---
+title: "p8105_hw6_hw2849"
+author: "Haotian Wu"
+date: "11/30/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+First, load and clean the `birthweight` dataset. 
+
+```{r, data import and tidy}
+birthweight = read_csv("./birthweight.csv") %>% 
+  janitor::clean_names() %>% 
+  drop_na() %>% 
+  mutate( ## recode factor variables
+    babysex = recode_factor(babysex, "1" = "male", "2" = "female"),
+    frace = recode_factor(frace, "1" = "White", "2" = "Black", "3" = "Asian", "4" = "Puerto Rican", "8" = "Other", "9" = "Unkown"),
+    mrace = recode_factor(mrace, "1" = "White", "2" = "Black", "3" = "Asian", "4" = "Puerto Rican", "8" = "Other"),
+    malform = recode_factor(malform, "0" = "absent", "1" = "present" )
+    ) %>%
+  print()
+
+```
+
+We converted variables into correct types. For example, `babysex`, `frace`, `mrace`, and `malform` were present in numeric, and after tidying, these variables are recoded as factor. Missing data are dropped. 
+
+
+
