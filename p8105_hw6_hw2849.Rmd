@@ -2,35 +2,128 @@
 title: "p8105_hw6_hw2849"
 author: "Haotian Wu"
 date: "11/30/2021"
-output: html_document
+output: github_document
 editor_options: 
   chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(modelr)
 
 knitr::opts_chunk$set(
-  echo = TRUE, warning = FALSE, message = FALSE)
+	echo = TRUE,
+	warning = FALSE,
+	fig.width = 8, 
+  fig.height = 6,
+  out.width = "90%",
+	dpi = 300
+)
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
 ```
 
-First, load and clean the `birthweight` dataset. 
+## Problem 1
+
+##### Load and Clean Data 
 
 ```{r, data import and tidy}
 birthweight = read_csv("./birthweight.csv") %>% 
   janitor::clean_names() %>% 
-  drop_na() %>% 
+  drop_na() %>%
   mutate( ## recode factor variables
     babysex = recode_factor(babysex, "1" = "male", "2" = "female"),
-    frace = recode_factor(frace, "1" = "White", "2" = "Black", "3" = "Asian", "4" = "Puerto Rican", "8" = "Other", "9" = "Unkown"),
-    mrace = recode_factor(mrace, "1" = "White", "2" = "Black", "3" = "Asian", "4" = "Puerto Rican", "8" = "Other"),
+    frace = recode_factor(frace, "1" = "White", "2" = "Black", "3" = "Asian", "4" = "Puerto Rican", "8" = "Other"),
+    mrace = recode_factor(mrace, "1" = "White", "2" = "Black", "3" = "Asian", "4" = "Puerto Rican"),
     malform = recode_factor(malform, "0" = "absent", "1" = "present" )
     ) %>%
   print()
-
 ```
 
-We converted variables into correct types. For example, `babysex`, `frace`, `mrace`, and `malform` were present in numeric, and after tidying, these variables are recoded as factor. Missing data are dropped. 
+We converted variables into correct types. For example, `babysex`, `frace`, `mrace`, and `malform` were present in numeric, and after tidying, these variables are recoded into factor. Missing data are dropped. After tidy, there are 4342 observations with 20 variables included in the data set. 
 
+##### Regression Models
 
+Evidences have shown biological and environmental behaviors of parents are associated with infant birth weight. We hypothesized parents' races, family incomes, pre-pregnancy weight and BMI, mothers' weight change during pregnancy, and smoking behavior would be factors that affect infant birth weight. In addition, we look at baby's birth length and head circumference which would be related to baby weight. Thus, building a model with predictors of `bhead`, `blength`, `fincome`, `frace`, `mrace`, `ppbmi`, `ppwt`, `smoken`, and `wtgain`, to see the associations of these variables with `bwt`.  
+
+```{r, regression model}
+my_model = lm(bwt ~  bhead + blength + fincome +frace + mrace + ppbmi + ppwt + smoken + wtgain, data = birthweight) ## regression model 
+
+my_model %>% ## tidy the regression model
+  broom::tidy() %>% 
+  select(term, estimate, p.value) %>% 
+  mutate(
+    term = str_replace(term, "^mrace", "mother race: ")
+    ) %>% 
+  knitr::kable(digits = 3)
+```
+
+Add residuals and predicted values to the model, and plot the model.
+
+```{r, resid and pred}
+resid_pred_model = birthweight %>%  ## add residuals and predicted values
+  add_residuals(my_model) %>% 
+  add_predictions(my_model)
+
+resid_pred_model %>% 
+  ggplot(aes(x = pred, y = resid, color = resid)) + 
+  geom_point(alpha = .5) + 
+  labs(
+    title = "Residuals vs fitted values",
+    x = "Predicted values",
+    y = "Residuals"
+  )
+  
+```
+
+##### Comparison
+
+Now, compare my model to two others. 
+
+```{r, comparison}
+## comparisons between models: cross validation
+cv_df = 
+  crossv_mc(birthweight, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+
+cv_df = cv_df %>% 
+  mutate(
+    my_model  = map(train, ~lm(bwt ~  bhead + blength + fincome +frace + mrace + ppbmi + ppwt + smoken + wtgain, data = .x)),
+    model1  = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)), ## length at birth and gestational age as predictors
+    model2  = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * bhead + bhead * blength * babysex, data = .x))  ## head circumference, length, sex, and all interactions between these
+  ) %>% 
+  mutate(
+    rmse_my_model = map2_dbl(my_model, test, ~rmse(model = .x, data = .y)),
+    rmse_model1 = map2_dbl(model1, test, ~rmse(model = .x, data = .y)),
+    rmse_model2 = map2_dbl(model2, test, ~rmse(model = .x, data = .y))
+  )
+
+## visualization the comparisons of models
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse, fill = model)) + 
+  geom_violin() + 
+  labs(
+    title = "Comparisons on RMSE among three models",
+    x = "Model",
+    y = "RMSE") + 
+  scale_x_discrete(
+    labels = c("my model", "length & gestational age", "head & length & sex & interaction"))
+```
+
+Comparing three models, we found that the model that we created `bwt ~  bhead + blength + fincome +frace + mrace + ppbmi + ppwt + smoken + wtgain` most accurately predicted the baby birthweight. 
 
