@@ -10,6 +10,7 @@ editor_options:
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(modelr)
+library(patchwork)
 
 knitr::opts_chunk$set(
 	echo = TRUE,
@@ -49,21 +50,18 @@ We converted variables into correct types. For example, `babysex`, `frace`, `mra
 
 ##### Regression Models
 
-Evidences have shown biological and environmental behaviors of parents are associated with infant birth weight. We hypothesized parents' races, family incomes, pre-pregnancy weight and BMI, mothers' weight change during pregnancy, and smoking behavior would be factors that affect infant birth weight. In addition, we look at baby's birth length and head circumference which would be related to baby weight. Thus, building a model with predictors of `bhead`, `blength`, `fincome`, `frace`, `mrace`, `ppbmi`, `ppwt`, `smoken`, and `wtgain`, to see the associations of these variables with `bwt`.  
+Evidences have shown social and environmental behaviors of parents are associated with infant birth weight. We hypothesized family incomes, pre-pregnancy weight and BMI, mothers' weight change during pregnancy, and smoking behavior would be factors that affect infant birth weight. In addition, we look at baby's birth length and head circumference which would be related to baby weight. Thus, building a model with predictors of `bhead`, `blength`, `fincome`, `ppbmi`, `ppwt`, `smoken`, and `wtgain`, to see the associations of these variables with `bwt`.  
 
 ```{r, regression model}
-my_model = lm(bwt ~  bhead + blength + fincome +frace + mrace + ppbmi + ppwt + smoken + wtgain, data = birthweight) ## regression model 
+my_model = lm(bwt ~  bhead + blength + fincome + ppbmi + ppwt + smoken + wtgain, data = birthweight) ## regression model 
 
 my_model %>% ## tidy the regression model
   broom::tidy() %>% 
   select(term, estimate, p.value) %>% 
-  mutate(
-    term = str_replace(term, "^mrace", "mother race: ")
-    ) %>% 
   knitr::kable(digits = 3)
 ```
 
-Add residuals and predicted values to the model, and plot the model.
+Add fitted values to the model, and plot the model residuals.
 
 ```{r, resid and pred}
 resid_pred_model = birthweight %>%  ## add residuals and predicted values
@@ -96,7 +94,7 @@ cv_df =
 
 cv_df = cv_df %>% 
   mutate(
-    my_model  = map(train, ~lm(bwt ~  bhead + blength + fincome +frace + mrace + ppbmi + ppwt + smoken + wtgain, data = .x)),
+    my_model  = map(train, ~lm(bwt ~  bhead + blength + fincome + ppbmi + ppwt + smoken + wtgain, data = .x)),
     model1  = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)), ## length at birth and gestational age as predictors
     model2  = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * bhead + bhead * blength * babysex, data = .x))  ## head circumference, length, sex, and all interactions between these
   ) %>% 
@@ -125,5 +123,101 @@ cv_df %>%
     labels = c("my model", "length & gestational age", "head & length & sex & interaction"))
 ```
 
-Comparing three models, we found that the model that we created `bwt ~  bhead + blength + fincome +frace + mrace + ppbmi + ppwt + smoken + wtgain` most accurately predicted the baby birthweight. 
+Comparing three models, we found that the model that we created `bwt ~  bhead + blength + fincome + ppbmi + ppwt + smoken + wtgain` most accurately predicted the baby birthweight. 
 
+
+## Problem 2
+
+2017 Central Park weather data.
+
+```{r, data frame}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+##### Some bootstrapping
+
+```{r, r square estimate}
+## estimate r square
+
+r_square = weather_df %>% 
+  bootstrap(n = 5000) %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::glance)
+  ) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  select(r.squared)
+
+## plot the distribution for r square
+
+r_square_plot = r_square %>% 
+  ggplot(aes(x = r.squared, fill = r.squared)) + 
+  geom_density() + 
+  labs(
+    title = "Distribution of Estimate of r square",
+    x = "r square"
+  )
+```
+
+
+```{r, log beta estimate}
+## estimate log beta_0 * beta_1
+
+beta_estimate = weather_df %>% 
+  modelr::bootstrap(n = 5000) %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  select(term, estimate) %>% 
+  mutate(
+    term = recode(term, "(Intercept)" = "intercept")
+  ) %>% 
+  pivot_wider(
+    names_from = "term",
+    values_from = "estimate") %>% 
+  unnest() %>% 
+  mutate(
+    log_beta = log(intercept * tmin)
+  )
+
+## plot the distribution for log beta
+
+beta_plot = beta_estimate %>% 
+  ggplot(aes(x = log_beta, fill = log_beta)) + 
+  geom_density() + 
+  labs(
+    title = "Distribution of Estimate of log beta",
+    x = "log(beta_0 * beta_1)"
+  )
+
+r_square_plot + beta_plot
+```
+
+With 5000 bootstrap samples for each estimate, we observed that the distribution of r square tends to be slightly left-skewed, and log(beta0 * beta1) is approximately normal.  
+
+##### 95% confidence interval
+
+```{r, confidence interval}
+## calculate the CI of r_square
+quantile(r_square$r.squared, c(0.025, 0.975)) 
+
+## calculate the CI of log(beta0*beta1)
+quantile(beta_estimate$log_beta, c(0.025, 0.975))
+```
+
+The 95% confident interval of $\hat r^2$ is (0.8937, 0.9274). 
+
+The 95% confident of $log(\hat \beta_0 * \hat \beta_1)$ is (1.9645, 2.0596). 
